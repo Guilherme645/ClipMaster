@@ -13,9 +13,14 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class AudioService {
@@ -31,6 +36,32 @@ public class AudioService {
     private volatile boolean isCancelled = false;
     private Process ffmpegProcess;
     private Thread cuttingThread;
+    private final Path rootLocation = Paths.get("C:/pastaudios");
+
+    // Listar todas as subpastas (rádios)
+    public List<String> listRadios() throws IOException {
+        try (Stream<Path> walk = Files.walk(rootLocation, 1)) {
+            return walk.filter(Files::isDirectory)
+                    .map(path -> path.getFileName().toString())
+                    .collect(Collectors.toList());
+        }
+    }
+
+    // Listar arquivos dentro de uma rádio específica (subpasta)
+    public Map<String, List<String>> listContentsFromRadio(String radioName) throws IOException {
+        Path radioPath = rootLocation.resolve(radioName);
+        if (!Files.exists(radioPath) || !Files.isDirectory(radioPath)) {
+            throw new IOException("Rádio não encontrada: " + radioName);
+        }
+
+        Map<String, List<String>> contents = new HashMap<>();
+        List<String> files = Files.walk(radioPath, 1)
+                .filter(Files::isRegularFile)
+                .map(path -> path.getFileName().toString())
+                .collect(Collectors.toList());
+        contents.put("files", files);
+        return contents;
+    }
 
     private AudioCutProgress cutProgress = new AudioCutProgress();
 
@@ -114,12 +145,24 @@ public class AudioService {
     }
 
     // Função para cortar um arquivo de áudio e atualizar o progresso
-    public String cutAudioFile(String fileName, double start, double duration) throws IOException {
+    public String cutAudioFile(String radioName, String fileName, double start, double duration) throws IOException {
         // Reseta o estado de pausa/cancelamento
         resetCutState();
 
-        String inputFilePath = UPLOAD_DIR + "/" + fileName;
-        String outputFilePath = OUTPUT_DIR + "/cortes_" + fileName;
+        // Construa o caminho completo do arquivo de entrada (incluindo a subpasta da rádio)
+        String inputFilePath = Paths.get(UPLOAD_DIR, radioName, fileName).toString();
+
+        // Obter a data atual no formato yyyy-MM-dd
+        String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+
+        // Criar o diretório com a data dentro de OUTPUT_DIR (se ainda não existir)
+        Path dateDirectory = Paths.get(OUTPUT_DIR, currentDate);
+        if (!Files.exists(dateDirectory)) {
+            Files.createDirectories(dateDirectory); // Cria o diretório
+        }
+
+        // Construa o caminho completo do arquivo de saída dentro do diretório de data
+        String outputFilePath = Paths.get(dateDirectory.toString(), "cortes_" + fileName).toString();
 
         // Comando FFmpeg para corte
         String[] command = {
@@ -198,7 +241,8 @@ public class AudioService {
             System.out.println("Corte interrompido.");
         }
 
-        return "cortes_" + fileName;
+        // Retornar o nome do arquivo cortado junto com o diretório da data
+        return Paths.get(currentDate, "cortes_" + fileName).toString();
     }
 
     // Retorna o progresso do corte

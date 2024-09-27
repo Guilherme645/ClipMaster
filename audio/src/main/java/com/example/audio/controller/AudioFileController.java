@@ -19,6 +19,8 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/audio")
@@ -28,8 +30,9 @@ public class AudioFileController {
     private AudioService audioService;
 
     // Endpoint para cortar o áudio
-    @PostMapping("/cut/{fileName}")
+    @PostMapping("/cut/{radioName}/{fileName}")
     public ResponseEntity<?> cutAudio(
+            @PathVariable("radioName") String radioName,
             @PathVariable("fileName") String fileName,
             @RequestParam("startSeconds") double startSeconds,
             @RequestParam("durationSeconds") double durationSeconds) {
@@ -40,8 +43,8 @@ public class AudioFileController {
                 return ResponseEntity.badRequest().body("Parâmetros inválidos.");
             }
 
-            // Chama o serviço de corte de áudio
-            String outputFileName = audioService.cutAudioFile(fileName, startSeconds, durationSeconds);
+            // Chama o serviço de corte de áudio, passando a rádio (subpasta) e o nome do arquivo
+            String outputFileName = audioService.cutAudioFile(radioName, fileName, startSeconds, durationSeconds);
 
             // Verifica se o arquivo foi gerado corretamente
             Path outputPath = Paths.get("C:/cortes/" + outputFileName);
@@ -63,6 +66,44 @@ public class AudioFileController {
         }
     }
 
+    @GetMapping("/radio")
+    public ResponseEntity<List<String>> listRadios() {
+        try {
+            List<String> radios = audioService.listRadios();
+            return ResponseEntity.ok(radios);
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(null);
+        }
+    }
+    @GetMapping("/radio/{radioName}/contents")
+    public ResponseEntity<Map<String, List<String>>> listContentsFromRadio(@PathVariable String radioName) {
+        try {
+            Map<String, List<String>> contents = audioService.listContentsFromRadio(radioName);
+            return ResponseEntity.ok(contents);
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(null);
+        }
+    }
+
+    // Reproduzir o arquivo de áudio de uma rádio específica
+    @GetMapping("/play/{radioName}/{fileName}")
+    public ResponseEntity<Resource> playAudio(@PathVariable String radioName, @PathVariable String fileName) {
+        try {
+            Path filePath = Paths.get("C:/pastaudios").resolve(radioName).resolve(fileName);
+            Resource resource = new UrlResource(filePath.toUri());
+
+            if (!resource.exists()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(Files.probeContentType(filePath)))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + fileName + "\"")
+                    .body(resource);
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(null);
+        }
+    }
 
     // Endpoint para obter o progresso atual do corte e o nome da rádio
     @GetMapping("/progress")
@@ -140,11 +181,35 @@ public class AudioFileController {
     }
 
     // Método para listar todos os arquivos de áudio na pasta cortes
+    // Método para listar todas as subpastas e arquivos de áudio cortados
     @GetMapping("/list/cortes")
-    public ResponseEntity<List<String>> listAllAudioFilesInCortes() {
+    public ResponseEntity<Map<String, List<String>>> listCortes() {
         try {
-            List<String> fileNames = audioService.listAudioFilesFromDirectory("C:/cortes");
-            return ResponseEntity.ok(fileNames);
+            // Caminho da pasta de cortes
+            Path cortesPath = Paths.get("C:/cortes");
+
+            // Map para armazenar subpastas e seus arquivos
+            Map<String, List<String>> cortes = new HashMap<>();
+
+            // Iterar sobre as subpastas (datas) na pasta de cortes
+            try (Stream<Path> walk = Files.walk(cortesPath, 1)) {
+                walk.filter(Files::isDirectory).forEach(subFolder -> {
+                    try {
+                        // Listar os arquivos de áudio em cada subpasta (corte por data)
+                        List<String> files = Files.walk(subFolder, 1)
+                                .filter(Files::isRegularFile)
+                                .map(path -> path.getFileName().toString())
+                                .collect(Collectors.toList());
+
+                        // Adicionar a subpasta e seus arquivos no map
+                        cortes.put(subFolder.getFileName().toString(), files);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                });
+            }
+
+            return ResponseEntity.ok(cortes);
         } catch (IOException e) {
             return ResponseEntity.status(500).body(null);
         }
