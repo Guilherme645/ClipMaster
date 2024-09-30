@@ -108,11 +108,29 @@ public class AudioFileController {
             processBuilder.redirectErrorStream(true); // Redireciona os erros para o stream padrão
             Process process = processBuilder.start();
 
-            // Lê a saída do processo (opcional, mas útil para debugar)
+            // Lê a saída do processo em tempo real e monitora o progresso
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String line;
+            double totalDuration = 0;
+            double currentTime = 0;
+
             while ((line = reader.readLine()) != null) {
-                System.out.println(line);  // Imprime a saída do processo
+                // Exibe a saída do processo no console (para debug)
+                System.out.println(line);
+
+                // Exemplo de linha que o FFmpeg gera: "time=00:01:23.45 bitrate=..."
+                if (line.contains("time=")) {
+                    // Extraímos o tempo atual do processamento do áudio
+                    String timeStr = line.substring(line.indexOf("time=") + 5, line.indexOf("bitrate=")).trim();
+                    currentTime = parseFFmpegTime(timeStr);
+
+                    // Se soubermos a duração total da transmissão (em segundos), podemos calcular o progresso
+                    if (totalDuration > 0) {
+                        int progress = (int) ((currentTime / totalDuration) * 100);
+                        // Enviar o progresso para o cliente, por exemplo, via WebSocket
+                        sendProgressToClient(progress);
+                    }
+                }
             }
 
             int exitCode = process.waitFor();
@@ -133,7 +151,19 @@ public class AudioFileController {
         }
     }
 
+    // Função auxiliar para analisar o tempo no formato "hh:mm:ss.xx" para segundos
+    private double parseFFmpegTime(String timeStr) {
+        String[] parts = timeStr.split(":");
+        double hours = Double.parseDouble(parts[0]);
+        double minutes = Double.parseDouble(parts[1]);
+        double seconds = Double.parseDouble(parts[2]);
+        return hours * 3600 + minutes * 60 + seconds;
+    }
 
+    // Função para enviar o progresso ao cliente (pode ser implementado com WebSocket)
+    private void sendProgressToClient(int progress) {
+        // Implementar WebSocket ou outra forma de comunicação com o frontend para enviar o progresso
+    }
 
     @GetMapping("/radio")
     public ResponseEntity<List<String>> listRadios() {
@@ -302,6 +332,27 @@ public class AudioFileController {
             }
 
             return ResponseEntity.ok(cortes);
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(null);
+        }
+    }
+    @GetMapping("/play/corte/{subFolder}/{fileName}")
+    public ResponseEntity<Resource> playCorte(@PathVariable String subFolder, @PathVariable String fileName) {
+        try {
+            // Caminho completo para o arquivo de áudio dentro da subpasta
+            Path filePath = Paths.get("C:/cortes").resolve(subFolder).resolve(fileName);
+            Resource resource = new UrlResource(filePath.toUri());
+
+            // Verifica se o arquivo existe
+            if (!resource.exists()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            // Retorna o arquivo de áudio para reprodução
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(Files.probeContentType(filePath)))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + fileName + "\"")
+                    .body(resource);
         } catch (IOException e) {
             return ResponseEntity.status(500).body(null);
         }
