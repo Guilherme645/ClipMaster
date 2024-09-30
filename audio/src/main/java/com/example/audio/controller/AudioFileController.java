@@ -11,7 +11,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -65,6 +67,73 @@ public class AudioFileController {
             return ResponseEntity.status(500).body("Erro ao processar o áudio: " + e.getMessage());
         }
     }
+    @PostMapping("/cut-live-segments")
+    public ResponseEntity<Map<String, String>> cutLiveStreamSegments(@RequestParam String streamUrl, @RequestParam String radioName) {
+        Map<String, String> response = new HashMap<>();
+
+        // Diretório base onde os arquivos serão salvos
+        String baseDirectory = "C:/pastaudios/" + radioName;
+
+        // Cria a subpasta correspondente ao nome da rádio, se não existir
+        Path radioDirectory = Paths.get(baseDirectory);
+        if (!Files.exists(radioDirectory)) {
+            try {
+                Files.createDirectories(radioDirectory); // Cria diretórios necessários
+            } catch (IOException e) {
+                e.printStackTrace();
+                response.put("status", "error");
+                response.put("message", "Erro ao criar diretório para a rádio: " + radioName);
+                return ResponseEntity.status(500).body(response);
+            }
+        }
+
+        // Caminho para salvar os arquivos cortados
+        String outputPath = baseDirectory + "/Segment_%Y%m%d_%H%M%S.mp3";
+        int segmentDuration = 300;  // 5 minutos (300 segundos)
+
+        // Comando FFmpeg para transcodificar o áudio para MP3
+        String[] command = {
+                "ffmpeg",
+                "-i", streamUrl,   // URL da stream ao vivo
+                "-c:a", "libmp3lame", // Codec de áudio para MP3
+                "-b:a", "128k",    // Taxa de bits de 128kbps para o áudio
+                "-f", "segment",   // Formato de segmentação
+                "-segment_time", String.valueOf(segmentDuration),  // Duração de cada segmento
+                "-strftime", "1",  // Usar nome de arquivo com data e hora
+                outputPath         // Caminho de saída do arquivo
+        };
+
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            processBuilder.redirectErrorStream(true); // Redireciona os erros para o stream padrão
+            Process process = processBuilder.start();
+
+            // Lê a saída do processo (opcional, mas útil para debugar)
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println(line);  // Imprime a saída do processo
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                response.put("status", "error");
+                response.put("message", "Erro durante a execução do FFmpeg.");
+                return ResponseEntity.status(500).body(response);
+            }
+
+            response.put("status", "success");
+            response.put("message", "Transmissão ao vivo cortada em segmentos de 5 minutos e salva em " + baseDirectory);
+            return ResponseEntity.ok(response);
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+            response.put("status", "error");
+            response.put("message", "Erro ao cortar a transmissão ao vivo.");
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+
 
     @GetMapping("/radio")
     public ResponseEntity<List<String>> listRadios() {
