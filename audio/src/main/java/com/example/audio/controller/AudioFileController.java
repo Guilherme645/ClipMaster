@@ -174,6 +174,29 @@ public class AudioFileController {
         }
     }
 
+    // Reproduzir o arquivo de áudio cortado de uma subpasta dentro da pasta 'cortes'
+    @GetMapping("/play-cut/{radioName}/{fileName}")
+    public ResponseEntity<Resource> playCutAudio(@PathVariable String radioName, @PathVariable String fileName) {
+        try {
+            // Caminho base da pasta 'cortes'
+            Path basePath = Paths.get("C:/cortes").resolve(radioName).resolve(fileName);
+            Resource resource = new UrlResource(basePath.toUri());
+
+            // Verifica se o arquivo existe
+            if (!resource.exists()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            // Retorna o arquivo com o tipo de conteúdo apropriado (por exemplo, audio/mp3)
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(Files.probeContentType(basePath)))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + fileName + "\"")
+                    .body(resource);
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(null);
+        }
+    }
+
     // Endpoint para obter o progresso atual do corte e o nome da rádio
     @GetMapping("/progress")
     public ResponseEntity<Map<String, Object>> getCutProgress(@RequestParam String radioName) {
